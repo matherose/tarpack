@@ -1,0 +1,42 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+
+# Test artifacts
+tests/tmp/
+*.tar.zst
+*.tar.zst.part
+*.jsonl
+tarpack_repo/
+
+# macOS
+.DS_Store
+._*
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.cache/
+.clangd/
+
+# Claude / AI assistant artifacts
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
