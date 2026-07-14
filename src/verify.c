@@ -320,8 +320,21 @@ static int verify_one_pack_objects(const char *repo, const char *pack_name) {
 
     struct archive_entry *entry;
     int rc;
-    while ((rc = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
+    /* ARCHIVE_WARN is accepted alongside ARCHIVE_OK: for pax entries whose
+     * UTF-8 pathname cannot be converted to the current locale charset (the
+     * process stays in the startup "C" locale), libarchive reports a warning
+     * but stores the raw UTF-8 bytes as the pathname -- which is exactly the
+     * byte sequence recorded in the pack manifest, so matching still works.
+     * (Nudging LC_CTYPE to a UTF-8 locale instead is NOT safe: on macOS the
+     * conversion normalizes to NFD, silently changing the pathname bytes.) */
+    while ((rc = archive_read_next_header(a, &entry)) == ARCHIVE_OK || rc == ARCHIVE_WARN) {
         const char *pathname = archive_entry_pathname(entry);
+        if (pathname == NULL) {
+            printf("%s: FAILED (entry with unreadable pathname)\n", pack_name);
+            failed = 1;
+            archive_read_data_skip(a);
+            continue;
+        }
         const struct tp_pack_manifest_entry *me = find_manifest_entry(entries, count, pathname);
         if (me == NULL) {
             printf("%s: %s: FAILED (present in archive, not in manifest)\n", pack_name, pathname);
