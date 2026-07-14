@@ -286,6 +286,21 @@ target_link_libraries(test_checksum PRIVATE tarpack_core)
 
 add_test(NAME test_checksum COMMAND test_checksum)
 
+add_executable(test_restore_paths tests/unit/test_restore_paths.c)
+target_include_directories(test_restore_paths PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/vendor)
+target_compile_definitions(test_restore_paths PRIVATE ${TARPACK_COMPILE_DEFS})
+target_compile_options(test_restore_paths PRIVATE
+    ${TARPACK_WARN_OPTIONS}
+    $<$<CONFIG:Debug>:${TARPACK_DEBUG_COMPILE_OPTIONS}>
+    $<$<CONFIG:Release>:${TARPACK_RELEASE_COMPILE_OPTIONS}>
+)
+target_link_options(test_restore_paths PRIVATE
+    $<$<CONFIG:Debug>:${TARPACK_DEBUG_LINK_OPTIONS}>
+)
+target_link_libraries(test_restore_paths PRIVATE tarpack_core)
+
+add_test(NAME test_restore_paths COMMAND test_restore_paths)
+
 add_test(
     NAME test_scan_integration
     COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_scan.sh $<TARGET_FILE:tarpack>
@@ -309,4 +324,9 @@ add_test(
 add_test(
     NAME test_crash_resume_integration
     COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_crash_resume.sh $<TARGET_FILE:tarpack>
+)
+
+add_test(
+    NAME test_roundtrip_integration
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_roundtrip.sh $<TARGET_FILE:tarpack>
 )

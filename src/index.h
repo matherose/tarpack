@@ -82,6 +82,15 @@ const struct tp_index_entry *tp_index_find_by_sha256(const struct tp_index *idx,
 int tp_index_object_id_present(const struct tp_index *idx, const char *object_id);
 
 /*
+ * tp_index_find_by_object_id: looks up an entry by exact object_id. Returns
+ * the entry (pack/offset/size/sha256/path) if present, NULL otherwise. The
+ * returned pointer is owned by *idx. Used by `tarpack restore` to resolve
+ * each snapshot object to the pack that holds it.
+ */
+const struct tp_index_entry *tp_index_find_by_object_id(const struct tp_index *idx,
+                                                          const char *object_id);
+
+/*
  * tp_index_append: appends `count` entries to <repo>/objects/objects.jsonl,
  * creating the file (and the objects/ directory) if needed. Opens in append
  * mode, writes each entry as one JSON line, then fflush+fsync. Does NOT

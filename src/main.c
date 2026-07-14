@@ -3,6 +3,7 @@
 #include <time.h>
 
 #include "packer.h"
+#include "restore.h"
 #include "scanner.h"
 #include "upload.h"
 #include "verify.h"
@@ -19,11 +20,6 @@ static void print_usage(void) {
             "  upload    upload a repository to a remote via rclone\n"
             "\n"
             "  --version  print version and exit\n");
-}
-
-static int cmd_not_implemented(const char *cmd) {
-    fprintf(stderr, "%s: not implemented yet\n", cmd);
-    return 2;
 }
 
 /* default_label: "YYYY-MM-DDTHH-MM-SS" in UTC, written into buf (must be
@@ -145,6 +141,36 @@ static int cmd_verify(int argc, char **argv) {
     return rc != 0 ? 1 : 0;
 }
 
+static int cmd_restore(int argc, char **argv) {
+    const char *repo = NULL;
+    const char *dest = NULL;
+    const char *snapshot = NULL;
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--repo") == 0 && i + 1 < argc) {
+            repo = argv[++i];
+        } else if (strcmp(argv[i], "--dest") == 0 && i + 1 < argc) {
+            dest = argv[++i];
+        } else if (strcmp(argv[i], "--snapshot") == 0 && i + 1 < argc) {
+            snapshot = argv[++i];
+        } else {
+            fprintf(stderr, "restore: unrecognized argument: %s\n", argv[i]);
+            return 64;
+        }
+    }
+
+    if (repo == NULL || dest == NULL) {
+        fprintf(stderr, "usage: tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>]\n");
+        return 64;
+    }
+
+    int rc = tp_restore(repo, dest, snapshot);
+    if (rc < 0) {
+        return 2; /* fatal */
+    }
+    return rc; /* 0 = clean, 1 = completed with warnings */
+}
+
 static int cmd_upload(int argc, char **argv) {
     const char *repo = NULL;
     const char *remote = NULL;
@@ -191,7 +217,7 @@ int main(int argc, char **argv) {
         return cmd_verify(argc, argv);
     }
     if (strcmp(arg, "restore") == 0) {
-        return cmd_not_implemented("restore");
+        return cmd_restore(argc, argv);
     }
     if (strcmp(arg, "upload") == 0) {
         return cmd_upload(argc, argv);

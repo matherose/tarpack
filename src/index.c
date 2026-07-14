@@ -50,6 +50,7 @@ struct by_sha_node {
 
 struct by_id_node {
     char *object_id; /* key, borrowed from the owning by_path_node's entry */
+    struct tp_index_entry *entry; /* points into the owning by_path_node */
     UT_hash_handle hh;
 };
 
@@ -159,6 +160,17 @@ int tp_index_object_id_present(const struct tp_index *idx, const char *object_id
     struct by_id_node *found = NULL;
     HASH_FIND_STR(head, object_id, found);
     return found != NULL;
+}
+
+const struct tp_index_entry *tp_index_find_by_object_id(const struct tp_index *idx,
+                                                          const char *object_id) {
+    if (object_id == NULL) {
+        return NULL;
+    }
+    struct by_id_node *head = (struct by_id_node *)idx->by_id_impl;
+    struct by_id_node *found = NULL;
+    HASH_FIND_STR(head, object_id, found);
+    return found != NULL ? found->entry : NULL;
 }
 
 /* numeric_suffix: parses the trailing digits of an "O<n>" style id. Returns
@@ -322,6 +334,7 @@ static int load_line_cb(const char *line, struct load_ctx *ctx) {
             return -1;
         }
         idnode->object_id = node->entry.object_id; /* borrowed */
+        idnode->entry = &node->entry;               /* borrowed */
 
         struct by_id_node *id_head = (struct by_id_node *)ctx->idx->by_id_impl;
         HASH_ADD_KEYPTR(hh, id_head, idnode->object_id, strlen(idnode->object_id), idnode);
