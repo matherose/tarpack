@@ -201,6 +201,30 @@ enum tp_pack_algo {
 };
 
 /*
+ * Content-aware packing (v1.2). Objects at least TP_PACK_ENTROPY_SAMPLE
+ * bytes long whose leading TP_PACK_ENTROPY_SAMPLE-byte sample measures at
+ * least TP_PACK_ENTROPY_MIN_BITS bits/byte of Shannon entropy are treated
+ * as already-compressed data (media, archives, encrypted blobs) and are
+ * packed into separate store-level packs written at zstd level
+ * TP_PACK_STORE_ZSTD_LEVEL -- still ordinary tar.zst, just without wasting
+ * CPU re-compressing incompressible bytes at default effort.
+ */
+#define TP_PACK_ENTROPY_SAMPLE ((size_t)(64 * 1024))
+#define TP_PACK_ENTROPY_MIN_BITS 7.5
+#define TP_PACK_STORE_ZSTD_LEVEL 1
+
+/*
+ * tp_sample_is_incompressible: samples the first TP_PACK_ENTROPY_SAMPLE
+ * bytes of <root_fd>/<path> and returns 1 if the file should be routed to a
+ * store-level pack, 0 otherwise. Files shorter than the sample size, and any
+ * open/read problem, classify as 0 (compressible): misclassifying in that
+ * direction costs only CPU, never correctness. When bits_out is non-NULL it
+ * receives the measured entropy in bits/byte (0.0 when no full sample was
+ * read).
+ */
+int tp_sample_is_incompressible(int root_fd, const char *path, int64_t size, double *bits_out);
+
+/*
  * tp_pack_multi: the v1.0 top-level pack operation. Behaves like tp_pack
  * (same snapshot resolution / index-skip semantics) but splits the objects
  * that still need storing across as many pack-NNNNNN files as required to

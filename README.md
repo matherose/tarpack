@@ -19,6 +19,7 @@ source tree ──scan──▶ snapshot manifest ──pack──▶ pack-NNNNN
 ```
 
 - **Deduplication.** Hardlinks are detected within a scan via `(dev, ino)` and stored once. Across runs, objects already in the index are skipped — keyed on `(path, size, mtime)` by default, or on SHA-256 content with `--hash`.
+- **Content-aware compression.** Files whose leading 64 KiB is already high-entropy (media, archives, encrypted data) are routed into separate store-level packs written at zstd level 1 — same tar.zst format, no CPU wasted re-compressing incompressible bytes.
 - **Crash safety.** Packs are written to a `.part` file, fsynced, and renamed; the object index is appended last, as the single source of truth. A run interrupted at any point resumes cleanly: torn index lines are truncated, unreferenced packs deleted, and their objects re-packed.
 - **Interop.** Packs are pax-format tar in one zstd frame: `tar --zstd -tf pack-000001.tar.zst` just works. Each entry carries the original mode, uid/gid *and* user/group names, and nanosecond mtimes, so even a plain `tar -x` restores sensible metadata. Hardlinks, symlinks, and directory metadata live in the snapshot manifest and are reproduced exactly by `tarpack restore`.
 
@@ -76,6 +77,8 @@ Walks `<root>` (an `openat`-based walker; symlinks are recorded, never followed)
 
 Packs every object from the snapshot (latest by default) that is not yet in the object index. `--target-size` accepts `K`/`M`/`G` suffixes (base 1024) and defaults to `50G`; a single object larger than the target gets its own pack. `next-fit` (default) keeps directory locality by packing in path order; `ffd` (first-fit decreasing) trades locality for tighter bins. Interrupted runs are recovered automatically on the next invocation.
 
+Packing is content-aware: each file ≥ 64 KiB has its first 64 KiB sampled, and files measuring ≥ 7.5 bits/byte of Shannon entropy (already-compressed media, archives, encrypted data) are grouped into separate packs written at zstd level 1 instead of the default effort. Classification never affects correctness — packs stay ordinary tar.zst — and any doubt (short file, read error) falls back to normal compression.
+
 ### `tarpack verify --repo <repodir> [--objects]`
 
 Recomputes the SHA-256 of every file listed in `checksums/SHA256SUMS` (the file is `shasum -c` compatible). With `--objects`, additionally streams every pack and re-hashes each entry against the pack manifest, detecting membership drift in both directions.
@@ -117,7 +120,7 @@ cmake --build build-debug
 ctest --test-dir build-debug --output-on-failure
 ```
 
-The suite is 17 tests (unit + shell-driven integration), including a full scan→pack→verify→restore roundtrip with hardlinks, dangling symlinks, non-ASCII names, and nanosecond mtimes, plus a kill-and-resume crash test. CI runs the matrix ubuntu/macos × Debug/Release with leak detection on Linux.
+The suite is 19 tests (unit + shell-driven integration), including a full scan→pack→verify→restore roundtrip with hardlinks, dangling symlinks, non-ASCII names, and nanosecond mtimes, a kill-and-resume crash test, and a content-aware packing roundtrip. CI runs the matrix ubuntu/macos × Debug/Release with leak detection on Linux.
 
 The original design document lives in [`deep-research-report.md`](deep-research-report.md).
 

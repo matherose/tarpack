@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <limits.h>
+#include <math.h>
 #include <pwd.h>
 #include <locale.h>
 #include <stdint.h>
@@ -985,6 +986,56 @@ static int pack_one_object(struct archive *a, int root_fd, struct tp_packed_obje
 /* Multi-pack splitting (milestone v1.0)                                   */
 /* ---------------------------------------------------------------------- */
 
+/* Classification must never affect correctness, only CPU spent: any doubt
+ * (short file, read error, borderline entropy) falls back to the normal
+ * compressible class, where the worst outcome is wasted compression effort. */
+int tp_sample_is_incompressible(int root_fd, const char *path, int64_t size, double *bits_out) {
+    if (bits_out != NULL) {
+        *bits_out = 0.0;
+    }
+    if (size < (int64_t)TP_PACK_ENTROPY_SAMPLE) {
+        return 0;
+    }
+
+    int fd = safe_openat(root_fd, path, O_RDONLY);
+    if (fd < 0) {
+        return 0; /* pack_one_object will surface the real error later */
+    }
+
+    /* single-threaded, so one static sample buffer is safe and keeps 64 KB
+     * off the stack */
+    static unsigned char buf[TP_PACK_ENTROPY_SAMPLE];
+    size_t got = 0;
+    while (got < sizeof(buf)) {
+        ssize_t n = read(fd, buf + got, sizeof(buf) - got);
+        if (n <= 0) {
+            break;
+        }
+        got += (size_t)n;
+    }
+    close(fd);
+    if (got < sizeof(buf)) {
+        return 0;
+    }
+
+    size_t hist[256] = {0};
+    for (size_t i = 0; i < got; i++) {
+        hist[buf[i]]++;
+    }
+    double bits = 0.0;
+    for (int b = 0; b < 256; b++) {
+        if (hist[b] == 0) {
+            continue;
+        }
+        double p = (double)hist[b] / (double)got;
+        bits -= p * log2(p);
+    }
+    if (bits_out != NULL) {
+        *bits_out = bits;
+    }
+    return bits >= TP_PACK_ENTROPY_MIN_BITS;
+}
+
 /* subset_ref: a lightweight, non-owning view over a contiguous run of
  * tp_packed_object entries borrowed from a larger tp_pack_object_set. Used
  * so write_one_pack_and_commit can operate on one bin's worth of objects
@@ -1367,6 +1418,8 @@ static int recover_crashed_state(const char *repo, const char *packs_dir) {
  * root_fd: open fd on the snapshot root, used to read source file data.
  * pack_num: the sequence number this pack will use (caller assigns,
  * monotonically increasing across calls for one tp_pack_multi run).
+ * zstd_level: 0 = libarchive's default level; > 0 = explicit zstd level
+ * (store-level packs of incompressible data pass TP_PACK_STORE_ZSTD_LEVEL).
  * out_pack_name: buffer (>= 32 bytes) that receives "pack-NNNNNN" on
  * success, for logging/testing purposes.
  *
@@ -1374,7 +1427,8 @@ static int recover_crashed_state(const char *repo, const char *packs_dir) {
  */
 static int write_one_pack_and_commit(const char *repo, const char *packs_dir, int root_fd,
                                       unsigned long pack_num, struct subset_ref subset,
-                                      char *out_pack_name, size_t out_pack_name_size) {
+                                      int zstd_level, char *out_pack_name,
+                                      size_t out_pack_name_size) {
     int result = 0;
 
     char pack_name[32];
@@ -1408,7 +1462,11 @@ static int write_one_pack_and_commit(const char *repo, const char *packs_dir, in
         tp_warnx("pack: out of memory creating archive writer");
         return -1;
     }
+    char zstd_level_opt[16];
+    snprintf(zstd_level_opt, sizeof(zstd_level_opt), "%d", zstd_level);
     if (archive_write_add_filter_zstd(a) != ARCHIVE_OK ||
+        (zstd_level > 0 && archive_write_set_filter_option(a, "zstd", "compression-level",
+                                                           zstd_level_opt) != ARCHIVE_OK) ||
         archive_write_set_format_pax_restricted(a) != ARCHIVE_OK ||
         archive_write_set_options(a, "hdrcharset=UTF-8") != ARCHIVE_OK ||
         archive_write_open_filename(a, pack_part) != ARCHIVE_OK) {
@@ -1656,6 +1714,55 @@ int tp_pack_multi(const char *repo, const char *snapshot_label, int64_t target_s
         return 0;
     }
 
+    /* --- content-aware classification: route incompressible objects into
+     * separate store-level packs (see tp_sample_is_incompressible) --- */
+    size_t split = new_set.count; /* objects[0..split) = normal class */
+    {
+        unsigned char *is_store = calloc(new_set.count, 1);
+        struct tp_packed_object *parted = malloc(new_set.count * sizeof(*parted));
+        if (is_store == NULL || parted == NULL) {
+            tp_warnx("pack: out of memory classifying objects");
+            free(is_store);
+            free(parted);
+            free(root);
+            free(chosen_label);
+            tp_pack_object_set_free(&new_set);
+            tp_index_free(&idx);
+            return -1;
+        }
+        int sample_fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        /* cannot open root: leave everything normal-class; the packing
+         * open below reports the real error */
+        if (sample_fd >= 0) {
+            for (size_t i = 0; i < new_set.count; i++) {
+                double bits = 0.0;
+                if (tp_sample_is_incompressible(sample_fd, new_set.objects[i].path,
+                                                 (int64_t)new_set.objects[i].size, &bits)) {
+                    is_store[i] = 1;
+                    tp_verbosex("pack: %s: %.2f bits/byte, routing to store-level pack",
+                                new_set.objects[i].path, bits);
+                }
+            }
+            close(sample_fd);
+        }
+        /* stable partition preserving path order inside each class */
+        size_t n = 0;
+        for (size_t i = 0; i < new_set.count; i++) {
+            if (!is_store[i]) {
+                parted[n++] = new_set.objects[i];
+            }
+        }
+        split = n;
+        for (size_t i = 0; i < new_set.count; i++) {
+            if (is_store[i]) {
+                parted[n++] = new_set.objects[i];
+            }
+        }
+        free(is_store);
+        free(new_set.objects);
+        new_set.objects = parted;
+    }
+
     /* Compute the estimated cost of each object and assign a bin (pack
      * number offset from the first pack written this run) via the chosen
      * pure algorithm. Both algorithms respect "oversized objects go alone
@@ -1677,9 +1784,25 @@ int tp_pack_multi(const char *repo, const char *snapshot_label, int64_t target_s
         items[i].cost = tp_estimate_entry_cost(new_set.objects[i].size);
     }
 
-    long bin_count = (algo == TP_PACK_ALGO_FFD)
-                          ? tp_bin_assign_ffd(items, new_set.count, target_size_bytes, bin_of)
-                          : tp_bin_assign_next_fit(items, new_set.count, target_size_bytes, bin_of);
+    /* Packs never mix compressibility classes: each class is binned
+     * independently, store-class bins numbered after the normal ones. */
+    long bin_count_normal =
+        (algo == TP_PACK_ALGO_FFD)
+            ? tp_bin_assign_ffd(items, split, target_size_bytes, bin_of)
+            : tp_bin_assign_next_fit(items, split, target_size_bytes, bin_of);
+    long bin_count_store =
+        (algo == TP_PACK_ALGO_FFD)
+            ? tp_bin_assign_ffd(items + split, new_set.count - split, target_size_bytes,
+                                 bin_of + split)
+            : tp_bin_assign_next_fit(items + split, new_set.count - split, target_size_bytes,
+                                      bin_of + split);
+    long bin_count =
+        (bin_count_normal < 0 || bin_count_store < 0) ? -1 : bin_count_normal + bin_count_store;
+    if (bin_count >= 0) {
+        for (size_t i = split; i < new_set.count; i++) {
+            bin_of[i] += (size_t)bin_count_normal;
+        }
+    }
     free(items);
     if (bin_count < 0) {
         tp_warnx("pack: bin assignment failed");
@@ -1784,8 +1907,9 @@ int tp_pack_multi(const char *repo, const char *snapshot_label, int64_t target_s
 
         char pack_name[32];
         int prc = write_one_pack_and_commit(repo, packs_dir, root_fd,
-                                            next_num + (unsigned long)b, subset, pack_name,
-                                            sizeof(pack_name));
+                                            next_num + (unsigned long)b, subset,
+                                            (b < bin_count_normal) ? 0 : TP_PACK_STORE_ZSTD_LEVEL,
+                                            pack_name, sizeof(pack_name));
         if (prc < 0) {
             fatal = 1;
             break;

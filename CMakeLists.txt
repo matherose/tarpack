@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(tarpack VERSION 1.1.0 LANGUAGES C)
+project(tarpack VERSION 1.2.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -88,7 +88,9 @@ target_include_directories(tarpack_core PUBLIC
 
 target_compile_definitions(tarpack_core PUBLIC ${TARPACK_COMPILE_DEFS})
 
-target_link_libraries(tarpack_core PUBLIC PkgConfig::LIBARCHIVE)
+# m: log2() in the entropy sampler (separate libm on glibc; a no-op alias
+# into libSystem on macOS).
+target_link_libraries(tarpack_core PUBLIC PkgConfig::LIBARCHIVE m)
 
 # Project sources: full warnings-as-errors treatment.
 foreach(src_file ${TARPACK_CORE_SOURCES})
@@ -306,6 +308,21 @@ target_link_libraries(test_restore_paths PRIVATE tarpack_core)
 
 add_test(NAME test_restore_paths COMMAND test_restore_paths)
 
+add_executable(test_entropy tests/unit/test_entropy.c)
+target_include_directories(test_entropy PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/vendor)
+target_compile_definitions(test_entropy PRIVATE ${TARPACK_COMPILE_DEFS})
+target_compile_options(test_entropy PRIVATE
+    ${TARPACK_WARN_OPTIONS}
+    $<$<CONFIG:Debug>:${TARPACK_DEBUG_COMPILE_OPTIONS}>
+    $<$<CONFIG:Release>:${TARPACK_RELEASE_COMPILE_OPTIONS}>
+)
+target_link_options(test_entropy PRIVATE
+    $<$<CONFIG:Debug>:${TARPACK_DEBUG_LINK_OPTIONS}>
+)
+target_link_libraries(test_entropy PRIVATE tarpack_core)
+
+add_test(NAME test_entropy COMMAND test_entropy)
+
 add_test(
     NAME test_scan_integration
     COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_scan.sh $<TARGET_FILE:tarpack>
@@ -334,4 +351,9 @@ add_test(
 add_test(
     NAME test_roundtrip_integration
     COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_roundtrip.sh $<TARGET_FILE:tarpack>
+)
+
+add_test(
+    NAME test_content_aware_integration
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_content_aware.sh $<TARGET_FILE:tarpack>
 )
