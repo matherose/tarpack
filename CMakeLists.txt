@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(tarpack C)
+project(tarpack VERSION 1.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -34,6 +34,7 @@ endif()
 # Compile definitions / options
 # ---------------------------------------------------------------------------
 set(TARPACK_COMPILE_DEFS
+    TARPACK_VERSION="${PROJECT_VERSION}"
     _POSIX_C_SOURCE=200809L
     # glibc shades the XSI file-type constants (S_IFREG, S_IFDIR, ...) behind
     # _DEFAULT_SOURCE; without it strict-C11 builds on Linux fail. No-op on

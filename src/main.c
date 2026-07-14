@@ -203,7 +203,10 @@ int main(int argc, char **argv) {
     const char *arg = argv[1];
 
     if (strcmp(arg, "--version") == 0) {
-        printf("tarpack 0.0.1\n");
+#ifndef TARPACK_VERSION
+#define TARPACK_VERSION "unknown"
+#endif
+        printf("tarpack " TARPACK_VERSION "\n");
         return 0;
     }
 
