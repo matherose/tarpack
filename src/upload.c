@@ -102,6 +102,15 @@ void tp_upload_argv_set_free(struct tp_upload_argv_set *set) {
  * the child's exit status (0-255) on normal exit, 2 if execvp itself failed
  * (rclone not found / not executable), or -1 on a fork/wait failure. */
 static int run_step(char **argv) {
+    if (tp_verbose) {
+        fputs("tarpack: upload: running", stderr);
+        for (int i = 0; argv[i] != NULL; i++) {
+            fputc(' ', stderr);
+            fputs(argv[i], stderr);
+        }
+        fputc('\n', stderr);
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         tp_warn("upload: fork failed");

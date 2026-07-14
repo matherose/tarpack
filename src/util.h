@@ -22,6 +22,17 @@ void tp_warn(const char *fmt, ...);
 void tp_warnx(const char *fmt, ...);
 
 /*
+ * tp_verbose: global verbosity flag, 0 by default. Set to 1 by the CLI when
+ * -v/--verbose is given.
+ */
+extern int tp_verbose;
+
+/*
+ * tp_verbosex: same as tp_warnx, but a no-op unless tp_verbose is set.
+ */
+void tp_verbosex(const char *fmt, ...);
+
+/*
  * safe_openat: openat() wrapper that always adds O_NOFOLLOW | O_CLOEXEC
  * to the caller-supplied flags. Returns the fd on success, or -1 on
  * failure (errno set by openat()).

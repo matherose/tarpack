@@ -37,6 +37,24 @@ void tp_warnx(const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
+int tp_verbose = 0;
+
+void tp_verbosex(const char *fmt, ...) {
+    if (!tp_verbose) {
+        return;
+    }
+
+    va_list ap;
+
+    fputs("tarpack: ", stderr);
+
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+
+    fputc('\n', stderr);
+}
+
 int safe_openat(int dirfd, const char *name, int flags) {
     return openat(dirfd, name, flags | O_NOFOLLOW | O_CLOEXEC);
 }

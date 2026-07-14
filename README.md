@@ -20,7 +20,7 @@ source tree ──scan──▶ snapshot manifest ──pack──▶ pack-NNNNN
 
 - **Deduplication.** Hardlinks are detected within a scan via `(dev, ino)` and stored once. Across runs, objects already in the index are skipped — keyed on `(path, size, mtime)` by default, or on SHA-256 content with `--hash`.
 - **Crash safety.** Packs are written to a `.part` file, fsynced, and renamed; the object index is appended last, as the single source of truth. A run interrupted at any point resumes cleanly: torn index lines are truncated, unreferenced packs deleted, and their objects re-packed.
-- **Interop.** Packs are pax-format tar in one zstd frame: `tar --zstd -tf pack-000001.tar.zst` just works.
+- **Interop.** Packs are pax-format tar in one zstd frame: `tar --zstd -tf pack-000001.tar.zst` just works. Each entry carries the original mode, uid/gid *and* user/group names, and nanosecond mtimes, so even a plain `tar -x` restores sensible metadata. Hardlinks, symlinks, and directory metadata live in the snapshot manifest and are reproduced exactly by `tarpack restore`.
 
 ## Building
 
@@ -66,11 +66,13 @@ Incremental use is the same commands again: a new `scan` records a new snapshot,
 
 ## Commands
 
-### `tarpack scan <root> --repo <repodir> [--label <name>] [--hash]`
+Every command except `verify` accepts `-v`/`--verbose` for a per-item progress line on stderr (`verify` already reports per item by design).
+
+### `tarpack scan <root> --repo <repodir> [--label <name>] [--hash] [-v]`
 
 Walks `<root>` (an `openat`-based walker; symlinks are recorded, never followed) and writes a snapshot manifest to `<repodir>/snapshots/<label>.jsonl`. The label defaults to the current UTC time (`YYYY-MM-DDTHH-MM-SS`). With `--hash`, files are SHA-256'd during the scan and dedup becomes content-based instead of `(path, size, mtime)`.
 
-### `tarpack pack --repo <repodir> [--snapshot <label>] [--target-size <size>] [--pack-algo next-fit|ffd]`
+### `tarpack pack --repo <repodir> [--snapshot <label>] [--target-size <size>] [--pack-algo next-fit|ffd] [-v]`
 
 Packs every object from the snapshot (latest by default) that is not yet in the object index. `--target-size` accepts `K`/`M`/`G` suffixes (base 1024) and defaults to `50G`; a single object larger than the target gets its own pack. `next-fit` (default) keeps directory locality by packing in path order; `ffd` (first-fit decreasing) trades locality for tighter bins. Interrupted runs are recovered automatically on the next invocation.
 
@@ -78,11 +80,11 @@ Packs every object from the snapshot (latest by default) that is not yet in the 
 
 Recomputes the SHA-256 of every file listed in `checksums/SHA256SUMS` (the file is `shasum -c` compatible). With `--objects`, additionally streams every pack and re-hashes each entry against the pack manifest, detecting membership drift in both directions.
 
-### `tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>]`
+### `tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>] [-v]`
 
 Rebuilds the tree from the latest (or named) snapshot: directories first, then one sequential pass per pack, extracting each object once and recreating additional hardlink names with `link()`. Symlink targets are restored byte-for-byte and never resolved. Modes and nanosecond mtimes are restored (directories last, deepest-first); ownership only when running as root. Every snapshot path is validated first — absolute paths or `..` components abort the restore before anything touches disk.
 
-### `tarpack upload --repo <repodir> --remote <rclone-remote-path>`
+### `tarpack upload --repo <repodir> --remote <rclone-remote-path> [-v]`
 
 Runs `rclone copy` for `packs/`, `checksums/`, `snapshots/`, and `objects/` — in that order, bulk data first, so the remote never lists metadata that outruns its pack bytes. Each rclone call is a plain `fork`+`execvp` (no shell involved). A non-zero rclone exit stops the sequence and is propagated.
 

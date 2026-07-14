@@ -6,7 +6,18 @@
 #include "restore.h"
 #include "scanner.h"
 #include "upload.h"
+#include "util.h"
 #include "verify.h"
+
+/* parse_verbose: recognizes -v/--verbose (shared by every subcommand except
+ * verify, whose output is already per-item). Returns 1 if consumed. */
+static int parse_verbose(const char *arg) {
+    if (strcmp(arg, "-v") == 0 || strcmp(arg, "--verbose") == 0) {
+        tp_verbose = 1;
+        return 1;
+    }
+    return 0;
+}
 
 static void print_usage(void) {
     fprintf(stderr,
@@ -44,6 +55,8 @@ static int cmd_scan(int argc, char **argv) {
             label = argv[++i];
         } else if (strcmp(argv[i], "--hash") == 0) {
             hash_mode = 1;
+        } else if (parse_verbose(argv[i])) {
+            ;
         } else if (root == NULL) {
             root = argv[i];
         } else {
@@ -53,7 +66,8 @@ static int cmd_scan(int argc, char **argv) {
     }
 
     if (root == NULL || repo == NULL) {
-        fprintf(stderr, "usage: tarpack scan <root> --repo <repodir> [--label <name>] [--hash]\n");
+        fprintf(stderr,
+                "usage: tarpack scan <root> --repo <repodir> [--label <name>] [--hash] [-v]\n");
         return 64;
     }
 
@@ -97,6 +111,8 @@ static int cmd_pack(int argc, char **argv) {
                         v);
                 return 64;
             }
+        } else if (parse_verbose(argv[i])) {
+            ;
         } else {
             fprintf(stderr, "pack: unrecognized argument: %s\n", argv[i]);
             return 64;
@@ -106,7 +122,7 @@ static int cmd_pack(int argc, char **argv) {
     if (repo == NULL) {
         fprintf(stderr,
                 "usage: tarpack pack --repo <repodir> [--snapshot <label>] "
-                "[--target-size <bytes>] [--pack-algo next-fit|ffd]\n");
+                "[--target-size <bytes>] [--pack-algo next-fit|ffd] [-v]\n");
         return 64;
     }
 
@@ -153,6 +169,8 @@ static int cmd_restore(int argc, char **argv) {
             dest = argv[++i];
         } else if (strcmp(argv[i], "--snapshot") == 0 && i + 1 < argc) {
             snapshot = argv[++i];
+        } else if (parse_verbose(argv[i])) {
+            ;
         } else {
             fprintf(stderr, "restore: unrecognized argument: %s\n", argv[i]);
             return 64;
@@ -160,7 +178,8 @@ static int cmd_restore(int argc, char **argv) {
     }
 
     if (repo == NULL || dest == NULL) {
-        fprintf(stderr, "usage: tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>]\n");
+        fprintf(stderr,
+                "usage: tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>] [-v]\n");
         return 64;
     }
 
@@ -180,6 +199,8 @@ static int cmd_upload(int argc, char **argv) {
             repo = argv[++i];
         } else if (strcmp(argv[i], "--remote") == 0 && i + 1 < argc) {
             remote = argv[++i];
+        } else if (parse_verbose(argv[i])) {
+            ;
         } else {
             fprintf(stderr, "upload: unrecognized argument: %s\n", argv[i]);
             return 64;
@@ -187,7 +208,8 @@ static int cmd_upload(int argc, char **argv) {
     }
 
     if (repo == NULL || remote == NULL) {
-        fprintf(stderr, "usage: tarpack upload --repo <repodir> --remote <rclone-remote-path>\n");
+        fprintf(stderr,
+                "usage: tarpack upload --repo <repodir> --remote <rclone-remote-path> [-v]\n");
         return 64;
     }
 

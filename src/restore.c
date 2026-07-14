@@ -534,6 +534,7 @@ static int stream_one_entry(struct archive *a, const char *full, const struct ne
         }
     }
 
+    tp_verbosex("restore: file %s", full);
     return warned;
 }
 
@@ -741,6 +742,7 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
             free(full);
             goto fatal;
         }
+        tp_verbosex("restore: dir %s", full);
         free(full);
     }
 
@@ -812,6 +814,8 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
             if (link(target, linkname) != 0) {
                 tp_warn("restore: cannot hardlink '%s' -> '%s'", linkname, target);
                 result = 1;
+            } else {
+                tp_verbosex("restore: hardlink %s => %s", linkname, target);
             }
             free(linkname);
         }
@@ -831,6 +835,7 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
             free(full);
             continue;
         }
+        tp_verbosex("restore: symlink %s -> %s", full, s->target);
         if (set_mtime(full, s->mtime_sec, s->mtime_nsec) != 0) {
             tp_warn("restore: cannot set mtime on symlink '%s'", full);
             result = 1;

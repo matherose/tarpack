@@ -3,7 +3,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
+#include <pwd.h>
 #include <locale.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -817,6 +819,44 @@ static unsigned long next_pack_number(const char *packs_dir) {
     return best + 1;
 }
 
+/* lookup_uname / lookup_gname: uid/gid -> name with a one-slot cache; backup
+ * trees are typically owned by a handful of users, so this avoids a
+ * getpwuid()/getgrgid() round trip on nearly every entry. Returns NULL when
+ * the id has no name on this system (only the numeric id is stored then). */
+static const char *lookup_uname(uid_t uid) {
+    static uid_t cached_uid;
+    static char cached_name[256];
+    static int cached_valid;
+
+    if (!cached_valid || cached_uid != uid) {
+        struct passwd *pw = getpwuid(uid);
+        cached_uid = uid;
+        cached_valid = 1;
+        if (pw == NULL || snprintf(cached_name, sizeof(cached_name), "%s", pw->pw_name) >=
+                              (int)sizeof(cached_name)) {
+            cached_name[0] = '\0';
+        }
+    }
+    return cached_name[0] != '\0' ? cached_name : NULL;
+}
+
+static const char *lookup_gname(gid_t gid) {
+    static gid_t cached_gid;
+    static char cached_name[256];
+    static int cached_valid;
+
+    if (!cached_valid || cached_gid != gid) {
+        struct group *gr = getgrgid(gid);
+        cached_gid = gid;
+        cached_valid = 1;
+        if (gr == NULL || snprintf(cached_name, sizeof(cached_name), "%s", gr->gr_name) >=
+                              (int)sizeof(cached_name)) {
+            cached_name[0] = '\0';
+        }
+    }
+    return cached_name[0] != '\0' ? cached_name : NULL;
+}
+
 /* pack_one_object: streams the file for object o from root_fd into the
  * archive, computing its sha256 and recording its data offset. Returns 0 on
  * success, 1 on a non-fatal warning (e.g. size mismatch handled), -1 fatal. */
@@ -853,8 +893,18 @@ static int pack_one_object(struct archive *a, int root_fd, struct tp_packed_obje
     archive_entry_set_perm(entry, o->mode_perm);
     archive_entry_set_uid(entry, o->uid);
     archive_entry_set_gid(entry, o->gid);
+    const char *uname = lookup_uname(o->uid);
+    if (uname != NULL) {
+        archive_entry_set_uname(entry, uname);
+    }
+    const char *gname = lookup_gname(o->gid);
+    if (gname != NULL) {
+        archive_entry_set_gname(entry, gname);
+    }
     archive_entry_set_size(entry, write_size);
     archive_entry_set_mtime(entry, o->mtime_sec, o->mtime_nsec);
+
+    tp_verbosex("pack: adding %s (%lld bytes)", o->path, (long long)write_size);
 
     if (archive_write_header(a, entry) != ARCHIVE_OK) {
         tp_warnx("pack: archive_write_header failed for '%s': %s", o->path, archive_error_string(a));
@@ -1413,6 +1463,8 @@ static int write_one_pack_and_commit(const char *repo, const char *packs_dir, in
         fsync(dfd);
         close(dfd);
     }
+
+    tp_verbosex("pack: committed %s.tar.zst (%zu object(s))", pack_name, subset.count);
 
     /* pack manifest: atomic .part+fsync+rename handled inside the helper */
     struct tp_pack_object_set subset_set;

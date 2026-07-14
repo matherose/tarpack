@@ -218,6 +218,7 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
             return;
         }
 
+        tp_verbosex("scan: dir %s", rel_path);
         scan_dir(ctx, sub_fd, rel_path);
         close(sub_fd);
         return;
@@ -247,6 +248,8 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
                                        st.st_dev, st.st_ino) != 0) {
             tp_warn("failed writing manifest entry for %s", rel_path);
             ctx->had_error = 1;
+        } else {
+            tp_verbosex("scan: symlink %s -> %s", rel_path, target);
         }
         return;
     }
@@ -306,6 +309,9 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
                                     mtime_nsec, st.st_dev, st.st_ino, obj->sha256_hex) != 0) {
             tp_warn("failed writing manifest entry for %s", rel_path);
             ctx->had_error = 1;
+        } else {
+            tp_verbosex("scan: file %s (object %s, %lld bytes)", rel_path, obj->id,
+                        (long long)st.st_size);
         }
         return;
     }
