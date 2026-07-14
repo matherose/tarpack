@@ -64,23 +64,31 @@ int main(void) {
     int rc = tp_snapshot_writer_open(&w, repo, "test-label", "/some/root");
     check(rc == 0, "writer_open succeeds and creates snapshots dir");
 
+    struct tp_extra_times et = {
+        .atime_sec = 1700000100,
+        .atime_nsec = 123,
+        .btime_sec = 1690000000,
+        .btime_nsec = 456,
+        .ctime_sec = 1700000200,
+        .ctime_nsec = 789,
+    };
     rc = tp_snapshot_write_file(&w, "dir/hello.txt", "O1", 2, 501, 20, 0644, 1234,
-                                 1700000000, 111, 10, 100, NULL);
+                                 1700000000, 111, 10, 100, NULL, &et);
     check(rc == 0, "write_file (ascii path) succeeds");
 
     const char bad_name[] = "bad\xFFname.txt";
     rc = tp_snapshot_write_file(&w, bad_name, "O2", 1, 501, 20, 0600, 42,
-                                 1700000001, 222, 10, 101, "");
+                                 1700000001, 222, 10, 101, "", NULL);
     check(rc == 0, "write_file (non-utf8 path) succeeds");
 
     const char sha_hex[] = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     rc = tp_snapshot_write_file(&w, "hashed.bin", "O3", 1, 501, 20, 0640, 999,
-                                 1700000003, 444, 10, 103, sha_hex);
+                                 1700000003, 444, 10, 103, sha_hex, NULL);
     check(rc == 0, "write_file (with sha256) succeeds");
 
     const char target[] = "../elsewhere";
     rc = tp_snapshot_write_symlink(&w, "dir/link", target, strlen(target), 501, 20,
-                                    1700000002, 333, 10, 102);
+                                    1700000002, 333, 10, 102, NULL);
     check(rc == 0, "write_symlink succeeds");
 
     rc = tp_snapshot_writer_close(&w);
@@ -121,6 +129,12 @@ int main(void) {
         check(e->dev == 10, "file dev round-trips");
         check(e->ino == 100, "file ino round-trips");
         check(e->sha256_hex[0] == '\0', "file with NULL sha256 arg has empty sha256_hex on read-back");
+        check(e->extra.atime_sec == 1700000100 && e->extra.atime_nsec == 123,
+              "file atime round-trips");
+        check(e->extra.btime_sec == 1690000000 && e->extra.btime_nsec == 456,
+              "file btime round-trips");
+        check(e->extra.ctime_sec == 1700000200 && e->extra.ctime_nsec == 789,
+              "file ctime round-trips");
     }
 
     if (c.count >= 3) {
@@ -130,6 +144,9 @@ int main(void) {
               "non-utf8 path round-trips to identical raw bytes via path_b64");
         check(e->object_id != NULL && strcmp(e->object_id, "O2") == 0, "second file object_id round-trips");
         check(e->sha256_hex[0] == '\0', "file with \"\" sha256 arg has empty sha256_hex on read-back");
+        check(e->extra.atime_sec == TP_TIME_ABSENT && e->extra.btime_sec == TP_TIME_ABSENT &&
+                  e->extra.ctime_sec == TP_TIME_ABSENT,
+              "NULL extra writes no fields; read back as TP_TIME_ABSENT");
     }
 
     if (c.count >= 4) {

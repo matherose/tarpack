@@ -44,31 +44,31 @@ int main(void) {
     check(rc == 0, "writer_open succeeds");
 
     /* dir entry (must be ignored) */
-    rc = tp_snapshot_write_dir(&w, "sub", 501, 20, 0755, 1700000000, 0, 10, 1);
+    rc = tp_snapshot_write_dir(&w, "sub", 501, 20, 0755, 1700000000, 0, 10, 1, NULL);
     check(rc == 0, "write_dir");
 
     /* first object: a hardlink pair -- two paths, same object_id O1.
      * The FIRST path listed ("a.txt") is the representative. */
     rc = tp_snapshot_write_file(&w, "a.txt", "O1", 2, 501, 20, 0644, 100, 1700000001, 11, 10, 100,
-                                 NULL);
+                                 NULL, NULL);
     check(rc == 0, "write_file a.txt (O1, first of hardlink pair)");
     rc = tp_snapshot_write_file(&w, "sub/a_link.txt", "O1", 2, 501, 20, 0644, 100, 1700000001, 11,
-                                 10, 100, NULL);
+                                 10, 100, NULL, NULL);
     check(rc == 0, "write_file sub/a_link.txt (O1, second of hardlink pair)");
 
     /* second distinct object */
     rc = tp_snapshot_write_file(&w, "b.txt", "O2", 1, 501, 20, 0600, 200, 1700000002, 22, 10, 101,
-                                 NULL);
+                                 NULL, NULL);
     check(rc == 0, "write_file b.txt (O2)");
 
     /* symlink entry (must be ignored) */
     rc = tp_snapshot_write_symlink(&w, "link", "a.txt", strlen("a.txt"), 501, 20, 1700000003, 0, 10,
-                                    102);
+                                    102, NULL);
     check(rc == 0, "write_symlink");
 
     /* third distinct object */
     rc = tp_snapshot_write_file(&w, "c.txt", "O3", 1, 501, 20, 0640, 0, 1700000004, 44, 10, 103,
-                                 NULL);
+                                 NULL, NULL);
     check(rc == 0, "write_file c.txt (O3, zero size)");
 
     rc = tp_snapshot_writer_close(&w);

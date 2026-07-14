@@ -21,7 +21,7 @@ source tree ──scan──▶ snapshot manifest ──pack──▶ pack-NNNNN
 - **Deduplication.** Hardlinks are detected within a scan via `(dev, ino)` and stored once. Across runs, objects already in the index are skipped — keyed on `(path, size, mtime)` by default, or on SHA-256 content with `--hash`.
 - **Content-aware compression.** Files whose leading 64 KiB is already high-entropy (media, archives, encrypted data) are routed into separate store-level packs written at zstd level 1 — same tar.zst format, no CPU wasted re-compressing incompressible bytes.
 - **Crash safety.** Packs are written to a `.part` file, fsynced, and renamed; the object index is appended last, as the single source of truth. A run interrupted at any point resumes cleanly: torn index lines are truncated, unreferenced packs deleted, and their objects re-packed.
-- **Interop.** Packs are pax-format tar in one zstd frame: `tar --zstd -tf pack-000001.tar.zst` just works. Each entry carries the original mode, uid/gid *and* user/group names, and nanosecond mtimes, so even a plain `tar -x` restores sensible metadata. Hardlinks, symlinks, and directory metadata live in the snapshot manifest and are reproduced exactly by `tarpack restore`.
+- **Interop.** Packs are pax-format tar in one zstd frame: `tar --zstd -tf pack-000001.tar.zst` just works. Each entry carries the original mode, uid/gid *and* user/group names, and the full set of nanosecond timestamps (mtime, atime, ctime, plus the creation date via the pax `LIBARCHIVE.creationtime` extension), so even a plain `tar -x` restores sensible metadata. Hardlinks, symlinks, and directory metadata live in the snapshot manifest and are reproduced exactly by `tarpack restore`.
 
 ## Building
 
@@ -85,7 +85,7 @@ Recomputes the SHA-256 of every file listed in `checksums/SHA256SUMS` (the file 
 
 ### `tarpack restore --repo <repodir> --dest <dir> [--snapshot <label>] [-v]`
 
-Rebuilds the tree from the latest (or named) snapshot: directories first, then one sequential pass per pack, extracting each object once and recreating additional hardlink names with `link()`. Symlink targets are restored byte-for-byte and never resolved. Modes and nanosecond mtimes are restored (directories last, deepest-first); ownership only when running as root. Every snapshot path is validated first — absolute paths or `..` components abort the restore before anything touches disk.
+Rebuilds the tree from the latest (or named) snapshot: directories first, then one sequential pass per pack, extracting each object once and recreating additional hardlink names with `link()`. Symlink targets are restored byte-for-byte and never resolved. Modes, nanosecond mtimes, and atimes are restored (directories last, deepest-first); creation dates are restored on macOS/BSD (Linux offers no API to set them — the values still live in the manifest and pax headers); ownership only when running as root. ctime is recorded at scan time but is kernel-managed and can never be written back. Every snapshot path is validated first — absolute paths or `..` components abort the restore before anything touches disk.
 
 ### `tarpack upload --repo <repodir> --remote <rclone-remote-path> [-v]`
 
@@ -120,7 +120,7 @@ cmake --build build-debug
 ctest --test-dir build-debug --output-on-failure
 ```
 
-The suite is 19 tests (unit + shell-driven integration), including a full scan→pack→verify→restore roundtrip with hardlinks, dangling symlinks, non-ASCII names, and nanosecond mtimes, a kill-and-resume crash test, and a content-aware packing roundtrip. CI runs the matrix ubuntu/macos × Debug/Release with leak detection on Linux.
+The suite is 20 tests (unit + shell-driven integration), including a full scan→pack→verify→restore roundtrip with hardlinks, dangling symlinks, non-ASCII names, and nanosecond mtimes, a kill-and-resume crash test, a content-aware packing roundtrip, and an atime/creation-date restore test. CI runs the matrix ubuntu/macos × Debug/Release with leak detection on Linux.
 
 The original design document lives in [`deep-research-report.md`](deep-research-report.md).
 

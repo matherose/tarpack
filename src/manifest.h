@@ -28,25 +28,45 @@ int tp_snapshot_writer_open(struct tp_snapshot_writer *w, const char *repo, cons
                              const char *root);
 
 /*
+ * tp_extra_times: the secondary timestamps of an entry (v1.3). mtime stays a
+ * required first-class field; these are best-effort extras. A *_sec value of
+ * TP_TIME_ABSENT means "not available" (e.g. btime on filesystems or kernels
+ * that do not expose it) and the corresponding manifest field is omitted.
+ * Note ctime (inode change time) and, on Linux, btime (creation time) are
+ * recorded for the archive but can never be written back at restore -- no
+ * OS API exists to set them.
+ */
+#define TP_TIME_ABSENT INT64_MIN
+struct tp_extra_times {
+    int64_t atime_sec;
+    long atime_nsec;
+    int64_t btime_sec; /* creation ("birth") time */
+    long btime_nsec;
+    int64_t ctime_sec; /* inode change time; informational only */
+    long ctime_nsec;
+};
+
+/*
  * tp_snapshot_write_file: appends a "file" entry line. path must be relative
  * to the scan root, '/'-separated, no leading "./". mode_perm is the
  * permission bits (e.g. 0644); it will be formatted as a 4-digit octal
  * string. sha256_hex is optional: pass NULL or "" to omit the "sha256"
  * field entirely (v0.3 hash mode populates it when a digest was computed
- * during scanning; fast-mode-only scans leave it unset). Returns 0 on
- * success, -1 on failure.
+ * during scanning; fast-mode-only scans leave it unset). extra is optional:
+ * NULL omits all secondary-timestamp fields (same as all-TP_TIME_ABSENT).
+ * Returns 0 on success, -1 on failure.
  */
 int tp_snapshot_write_file(struct tp_snapshot_writer *w, const char *path, const char *object_id,
                             nlink_t nlink, uid_t uid, gid_t gid, mode_t mode_perm, off_t size,
                             int64_t mtime_sec, long mtime_nsec, dev_t dev, ino_t ino,
-                            const char *sha256_hex);
+                            const char *sha256_hex, const struct tp_extra_times *extra);
 
 /*
  * tp_snapshot_write_dir: appends a "dir" entry line.
  */
 int tp_snapshot_write_dir(struct tp_snapshot_writer *w, const char *path, uid_t uid, gid_t gid,
                            mode_t mode_perm, int64_t mtime_sec, long mtime_nsec, dev_t dev,
-                           ino_t ino);
+                           ino_t ino, const struct tp_extra_times *extra);
 
 /*
  * tp_snapshot_write_symlink: appends a "symlink" entry line. target_len is
@@ -55,7 +75,8 @@ int tp_snapshot_write_dir(struct tp_snapshot_writer *w, const char *path, uid_t 
  */
 int tp_snapshot_write_symlink(struct tp_snapshot_writer *w, const char *path, const char *target,
                                size_t target_len, uid_t uid, gid_t gid, int64_t mtime_sec,
-                               long mtime_nsec, dev_t dev, ino_t ino);
+                               long mtime_nsec, dev_t dev, ino_t ino,
+                               const struct tp_extra_times *extra);
 
 /*
  * tp_snapshot_writer_close: flushes and closes the underlying file, frees
@@ -103,6 +124,10 @@ struct tp_manifest_entry {
     char *target;        /* symlink only */
     size_t target_len;
     char sha256_hex[65]; /* file only; empty string if the "sha256" field was absent */
+
+    /* secondary timestamps; *_sec == TP_TIME_ABSENT when the field was
+     * missing (snapshots written before v1.3, or unavailable at scan time) */
+    struct tp_extra_times extra;
 };
 
 /*

@@ -1,3 +1,7 @@
+/* statx() (Linux creation-time capture) is only declared under _GNU_SOURCE;
+ * must precede every include. Harmless elsewhere. */
+#define _GNU_SOURCE 1
+
 #include "scanner.h"
 
 #include <dirent.h>
@@ -21,6 +25,42 @@
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
+
+/* collect_extra_times: fills atime/ctime from *st and the creation time
+ * where the OS exposes one (st_birthtimespec on macOS/BSD, statx() on
+ * Linux). Anything unavailable is left TP_TIME_ABSENT and simply omitted
+ * from the manifest; restore treats every extra time as best-effort. */
+static void collect_extra_times(int dirfd, const char *name, const struct stat *st,
+                                struct tp_extra_times *out) {
+#ifdef __APPLE__
+    out->atime_sec = (int64_t)st->st_atimespec.tv_sec;
+    out->atime_nsec = (long)st->st_atimespec.tv_nsec;
+    out->ctime_sec = (int64_t)st->st_ctimespec.tv_sec;
+    out->ctime_nsec = (long)st->st_ctimespec.tv_nsec;
+    out->btime_sec = (int64_t)st->st_birthtimespec.tv_sec;
+    out->btime_nsec = (long)st->st_birthtimespec.tv_nsec;
+    (void)dirfd;
+    (void)name;
+#else
+    out->atime_sec = (int64_t)st->st_atim.tv_sec;
+    out->atime_nsec = (long)st->st_atim.tv_nsec;
+    out->ctime_sec = (int64_t)st->st_ctim.tv_sec;
+    out->ctime_nsec = (long)st->st_ctim.tv_nsec;
+    out->btime_sec = TP_TIME_ABSENT;
+    out->btime_nsec = 0;
+#if defined(__linux__) && defined(STATX_BTIME)
+    struct statx stx;
+    if (statx(dirfd, name, AT_SYMLINK_NOFOLLOW, STATX_BTIME, &stx) == 0 &&
+        (stx.stx_mask & STATX_BTIME) != 0) {
+        out->btime_sec = (int64_t)stx.stx_btime.tv_sec;
+        out->btime_nsec = (long)stx.stx_btime.tv_nsec;
+    }
+#else
+    (void)dirfd;
+    (void)name;
+#endif
+#endif
+}
 
 struct scan_ctx {
     struct tp_object_table objects;
@@ -191,6 +231,9 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
         return;
     }
 
+    struct tp_extra_times extra;
+    collect_extra_times(dirfd, name, &st, &extra);
+
     if (S_ISDIR(st.st_mode)) {
         if (ctx->have_repo_stat && st.st_dev == ctx->repo_dev && st.st_ino == ctx->repo_ino) {
             /* skip the repo directory itself to avoid self-backup loops */
@@ -211,7 +254,7 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
 #else
                                    (int64_t)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec,
 #endif
-                                   st.st_dev, st.st_ino) != 0) {
+                                   st.st_dev, st.st_ino, &extra) != 0) {
             tp_warn("failed writing manifest entry for %s", rel_path);
             ctx->had_error = 1;
             close(sub_fd);
@@ -245,7 +288,7 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
 #else
                                        (int64_t)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec,
 #endif
-                                       st.st_dev, st.st_ino) != 0) {
+                                       st.st_dev, st.st_ino, &extra) != 0) {
             tp_warn("failed writing manifest entry for %s", rel_path);
             ctx->had_error = 1;
         } else {
@@ -306,7 +349,8 @@ static void handle_entry(struct scan_ctx *ctx, int dirfd, const char *rel_dir, c
 
         if (tp_snapshot_write_file(&ctx->writer, rel_path, obj->id, st.st_nlink, st.st_uid,
                                     st.st_gid, st.st_mode & 07777, st.st_size, mtime_sec,
-                                    mtime_nsec, st.st_dev, st.st_ino, obj->sha256_hex) != 0) {
+                                    mtime_nsec, st.st_dev, st.st_ino, obj->sha256_hex,
+                                    &extra) != 0) {
             tp_warn("failed writing manifest entry for %s", rel_path);
             ctx->had_error = 1;
         } else {

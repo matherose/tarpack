@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "manifest.h" /* struct tp_extra_times */
+
 /*
  * tarpack restore: reconstruct a scanned tree from a repository into a
  * destination directory.
@@ -72,6 +74,7 @@ struct tp_restore_link_group {
     off_t size;
     int64_t mtime_sec;
     long mtime_nsec;
+    struct tp_extra_times extra; /* atime/btime best-effort; ctime informational */
 };
 
 /*

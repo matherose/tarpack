@@ -78,18 +78,18 @@ int main(void) {
     check(rc == 0, "writer_open succeeds");
 
     /* O1: a plain first object */
-    tp_snapshot_write_file(&w, "first.txt", "O1", 1, 501, 20, 0644, 10, 1700000000, 0, 10, 100, NULL);
+    tp_snapshot_write_file(&w, "first.txt", "O1", 1, 501, 20, 0644, 10, 1700000000, 0, 10, 100, NULL, NULL);
     /* O2: a 3-name hardlink group. "link_a" is first -> the link target. */
-    tp_snapshot_write_file(&w, "link_a", "O2", 3, 501, 20, 0644, 20, 1700000001, 0, 10, 101, NULL);
-    tp_snapshot_write_dir(&w, "sub", 501, 20, 0755, 1700000002, 0, 10, 200);
+    tp_snapshot_write_file(&w, "link_a", "O2", 3, 501, 20, 0644, 20, 1700000001, 0, 10, 101, NULL, NULL);
+    tp_snapshot_write_dir(&w, "sub", 501, 20, 0755, 1700000002, 0, 10, 200, NULL);
     tp_snapshot_write_file(&w, "sub/link_b", "O2", 3, 501, 20, 0644, 20, 1700000001, 0, 10, 101,
-                            NULL);
-    tp_snapshot_write_file(&w, "link_c", "O2", 3, 501, 20, 0644, 20, 1700000001, 0, 10, 101, NULL);
+                            NULL, NULL);
+    tp_snapshot_write_file(&w, "link_c", "O2", 3, 501, 20, 0644, 20, 1700000001, 0, 10, 101, NULL, NULL);
     /* symlink entry (must be ignored by link grouping) */
     tp_snapshot_write_symlink(&w, "slink", "first.txt", strlen("first.txt"), 501, 20, 1700000003, 0,
-                               10, 300);
+                               10, 300, NULL);
     /* O3: another plain object, seen after the hardlink group */
-    tp_snapshot_write_file(&w, "last.txt", "O3", 1, 501, 20, 0600, 30, 1700000004, 0, 10, 102, NULL);
+    tp_snapshot_write_file(&w, "last.txt", "O3", 1, 501, 20, 0600, 30, 1700000004, 0, 10, 102, NULL, NULL);
     check(w.error == 0, "all snapshot writes succeed");
     check(tp_snapshot_writer_close(&w) == 0, "writer_close succeeds");
 

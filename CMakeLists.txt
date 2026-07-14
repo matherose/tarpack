@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(tarpack VERSION 1.2.0 LANGUAGES C)
+project(tarpack VERSION 1.3.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -356,4 +356,9 @@ add_test(
 add_test(
     NAME test_content_aware_integration
     COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_content_aware.sh $<TARGET_FILE:tarpack>
+)
+
+add_test(
+    NAME test_times_integration
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/integration/test_times.sh $<TARGET_FILE:tarpack>
 )

@@ -114,6 +114,7 @@ static int collect_cb(const struct tp_manifest_entry *entry, void *user_data) {
     o->size = entry->size;
     o->mtime_sec = entry->mtime_sec;
     o->mtime_nsec = entry->mtime_nsec;
+    o->extra = entry->extra;
     o->offset = 0;
     o->sha256_hex[0] = '\0';
 
@@ -904,6 +905,17 @@ static int pack_one_object(struct archive *a, int root_fd, struct tp_packed_obje
     }
     archive_entry_set_size(entry, write_size);
     archive_entry_set_mtime(entry, o->mtime_sec, o->mtime_nsec);
+    /* secondary timestamps ride along in the pax extended header (atime,
+     * ctime, and the LIBARCHIVE.creationtime extension for btime) */
+    if (o->extra.atime_sec != TP_TIME_ABSENT) {
+        archive_entry_set_atime(entry, (time_t)o->extra.atime_sec, o->extra.atime_nsec);
+    }
+    if (o->extra.ctime_sec != TP_TIME_ABSENT) {
+        archive_entry_set_ctime(entry, (time_t)o->extra.ctime_sec, o->extra.ctime_nsec);
+    }
+    if (o->extra.btime_sec != TP_TIME_ABSENT) {
+        archive_entry_set_birthtime(entry, (time_t)o->extra.btime_sec, o->extra.btime_nsec);
+    }
 
     tp_verbosex("pack: adding %s (%lld bytes)", o->path, (long long)write_size);
 
@@ -1464,10 +1476,15 @@ static int write_one_pack_and_commit(const char *repo, const char *packs_dir, in
     }
     char zstd_level_opt[16];
     snprintf(zstd_level_opt, sizeof(zstd_level_opt), "%d", zstd_level);
+    /* Full pax interchange (not "restricted"): restricted pax silently
+     * drops the timestamps that don't fit ustar (nanosecond mtimes, atime,
+     * ctime, creation time) unless something else already forced an
+     * extended header. Interchange writes them for every entry, so the
+     * pack itself carries full metadata even without the manifests. */
     if (archive_write_add_filter_zstd(a) != ARCHIVE_OK ||
         (zstd_level > 0 && archive_write_set_filter_option(a, "zstd", "compression-level",
                                                            zstd_level_opt) != ARCHIVE_OK) ||
-        archive_write_set_format_pax_restricted(a) != ARCHIVE_OK ||
+        archive_write_set_format_pax(a) != ARCHIVE_OK ||
         archive_write_set_options(a, "hdrcharset=UTF-8") != ARCHIVE_OK ||
         archive_write_open_filename(a, pack_part) != ARCHIVE_OK) {
         tp_warnx("pack: cannot open archive '%s': %s", pack_part, archive_error_string(a));

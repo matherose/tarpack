@@ -175,8 +175,18 @@ int tp_snapshot_writer_open(struct tp_snapshot_writer *w, const char *repo, cons
     return 0;
 }
 
+static void add_time_pair(cJSON *obj, const char *sec_key, const char *nsec_key, int64_t sec,
+                          long nsec) {
+    if (sec == TP_TIME_ABSENT) {
+        return;
+    }
+    cJSON_AddItemToObject(obj, sec_key, cJSON_CreateNumber((double)sec));
+    cJSON_AddItemToObject(obj, nsec_key, cJSON_CreateNumber((double)nsec));
+}
+
 static cJSON *make_common_entry(const char *type, const char *path, uid_t uid, gid_t gid,
-                                 int64_t mtime_sec, long mtime_nsec, dev_t dev, ino_t ino) {
+                                 int64_t mtime_sec, long mtime_nsec, dev_t dev, ino_t ino,
+                                 const struct tp_extra_times *extra) {
     cJSON *obj = cJSON_CreateObject();
     if (obj == NULL) {
         return NULL;
@@ -190,6 +200,11 @@ static cJSON *make_common_entry(const char *type, const char *path, uid_t uid, g
     cJSON_AddItemToObject(obj, "gid", cJSON_CreateNumber((double)gid));
     cJSON_AddItemToObject(obj, "mtime_sec", cJSON_CreateNumber((double)mtime_sec));
     cJSON_AddItemToObject(obj, "mtime_nsec", cJSON_CreateNumber((double)mtime_nsec));
+    if (extra != NULL) {
+        add_time_pair(obj, "atime_sec", "atime_nsec", extra->atime_sec, extra->atime_nsec);
+        add_time_pair(obj, "btime_sec", "btime_nsec", extra->btime_sec, extra->btime_nsec);
+        add_time_pair(obj, "ctime_sec", "ctime_nsec", extra->ctime_sec, extra->ctime_nsec);
+    }
     cJSON_AddItemToObject(obj, "dev", cJSON_CreateNumber((double)dev));
     cJSON_AddItemToObject(obj, "ino", cJSON_CreateNumber((double)ino));
     return obj;
@@ -204,12 +219,12 @@ static void add_mode_field(cJSON *obj, mode_t mode_perm) {
 int tp_snapshot_write_file(struct tp_snapshot_writer *w, const char *path, const char *object_id,
                             nlink_t nlink, uid_t uid, gid_t gid, mode_t mode_perm, off_t size,
                             int64_t mtime_sec, long mtime_nsec, dev_t dev, ino_t ino,
-                            const char *sha256_hex) {
+                            const char *sha256_hex, const struct tp_extra_times *extra) {
     if (w->error != 0) {
         return -1;
     }
 
-    cJSON *obj = make_common_entry("file", path, uid, gid, mtime_sec, mtime_nsec, dev, ino);
+    cJSON *obj = make_common_entry("file", path, uid, gid, mtime_sec, mtime_nsec, dev, ino, extra);
     if (obj == NULL) {
         w->error = -1;
         return -1;
@@ -227,12 +242,12 @@ int tp_snapshot_write_file(struct tp_snapshot_writer *w, const char *path, const
 
 int tp_snapshot_write_dir(struct tp_snapshot_writer *w, const char *path, uid_t uid, gid_t gid,
                            mode_t mode_perm, int64_t mtime_sec, long mtime_nsec, dev_t dev,
-                           ino_t ino) {
+                           ino_t ino, const struct tp_extra_times *extra) {
     if (w->error != 0) {
         return -1;
     }
 
-    cJSON *obj = make_common_entry("dir", path, uid, gid, mtime_sec, mtime_nsec, dev, ino);
+    cJSON *obj = make_common_entry("dir", path, uid, gid, mtime_sec, mtime_nsec, dev, ino, extra);
     if (obj == NULL) {
         w->error = -1;
         return -1;
@@ -244,12 +259,14 @@ int tp_snapshot_write_dir(struct tp_snapshot_writer *w, const char *path, uid_t 
 
 int tp_snapshot_write_symlink(struct tp_snapshot_writer *w, const char *path, const char *target,
                                size_t target_len, uid_t uid, gid_t gid, int64_t mtime_sec,
-                               long mtime_nsec, dev_t dev, ino_t ino) {
+                               long mtime_nsec, dev_t dev, ino_t ino,
+                               const struct tp_extra_times *extra) {
     if (w->error != 0) {
         return -1;
     }
 
-    cJSON *obj = make_common_entry("symlink", path, uid, gid, mtime_sec, mtime_nsec, dev, ino);
+    cJSON *obj =
+        make_common_entry("symlink", path, uid, gid, mtime_sec, mtime_nsec, dev, ino, extra);
     if (obj == NULL) {
         w->error = -1;
         return -1;
@@ -414,6 +431,13 @@ static int64_t get_i64(const cJSON *obj, const char *key) {
     return cJSON_IsNumber(item) ? (int64_t)item->valuedouble : 0;
 }
 
+/* like get_i64, but a caller-chosen default distinguishes "field missing"
+ * (pre-v1.3 snapshots omit the secondary timestamps) from a real 0 value */
+static int64_t get_i64_default(const cJSON *obj, const char *key, int64_t dflt) {
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return cJSON_IsNumber(item) ? (int64_t)item->valuedouble : dflt;
+}
+
 static char *get_string_dup(const cJSON *obj, const char *key) {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (!cJSON_IsString(item) || item->valuestring == NULL) {
@@ -461,6 +485,12 @@ int tp_manifest_parse_line(const char *line, struct tp_manifest_entry *out) {
     out->gid = (gid_t)get_i64(root, "gid");
     out->mtime_sec = get_i64(root, "mtime_sec");
     out->mtime_nsec = (long)get_i64(root, "mtime_nsec");
+    out->extra.atime_sec = get_i64_default(root, "atime_sec", TP_TIME_ABSENT);
+    out->extra.atime_nsec = (long)get_i64(root, "atime_nsec");
+    out->extra.btime_sec = get_i64_default(root, "btime_sec", TP_TIME_ABSENT);
+    out->extra.btime_nsec = (long)get_i64(root, "btime_nsec");
+    out->extra.ctime_sec = get_i64_default(root, "ctime_sec", TP_TIME_ABSENT);
+    out->extra.ctime_nsec = (long)get_i64(root, "ctime_nsec");
     out->dev = (dev_t)get_i64(root, "dev");
     out->ino = (ino_t)get_i64(root, "ino");
 

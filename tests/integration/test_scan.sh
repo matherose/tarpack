@@ -163,14 +163,29 @@ nonascii_entry = by_path.get(nonascii_name)
 check(nonascii_entry is not None, 'non-ascii utf-8 filename round-trips as plain path string')
 check(nonascii_entry is not None and 'path_b64' not in nonascii_entry, 'valid utf-8 path does not use path_b64')
 
-# deterministic order: run1 vs run2 identical apart from header "created"
+# secondary timestamps (v1.3) are recorded on every entry
+check(a_txt is not None and 'atime_sec' in a_txt and 'atime_nsec' in a_txt,
+      'file entry records atime')
+check(a_txt is not None and 'ctime_sec' in a_txt and 'ctime_nsec' in a_txt,
+      'file entry records ctime')
+
+# deterministic order: run1 vs run2 identical apart from header "created" and
+# the volatile timestamps -- reading a tree changes atimes (scan #1 itself
+# bumps directory atimes), so atime/ctime are honest observations, not
+# identity. btime never changes and stays in the comparison.
+VOLATILE = ('atime_sec', 'atime_nsec', 'ctime_sec', 'ctime_nsec')
+
 def strip_created(header):
     h = dict(header)
     h.pop('created', None)
     return h
 
+def strip_volatile(entries):
+    return [{k: v for k, v in e.items() if k not in VOLATILE} for e in entries]
+
 check(strip_created(header1) == strip_created(header2), 'headers identical apart from created field')
-check(entries1 == entries2, 'entries identical and in the same order across repeated scans')
+check(strip_volatile(entries1) == strip_volatile(entries2),
+      'entries identical and in the same order across repeated scans (modulo atime/ctime)')
 
 if failures:
     print(f"\n{len(failures)} check(s) failed", file=sys.stderr)

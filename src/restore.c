@@ -12,6 +12,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <sys/attr.h> /* setattrlist: the only portable-ish way to restore creation dates */
+#endif
+
 #include <archive.h>
 #include <archive_entry.h>
 
@@ -124,6 +128,7 @@ static int collect_links_cb(const struct tp_manifest_entry *entry, void *user_da
         g->size = entry->size;
         g->mtime_sec = entry->mtime_sec;
         g->mtime_nsec = entry->mtime_nsec;
+        g->extra = entry->extra;
         ctx->set->count++;
     }
 
@@ -300,15 +305,48 @@ static void bytes_to_hex(const unsigned char *in, size_t n, char *out) {
     out[n * 2] = '\0';
 }
 
-/* set_mtime: utimensat with AT_SYMLINK_NOFOLLOW (works for symlinks too);
- * atime is left untouched (UTIME_OMIT). Returns 0/-1. */
-static int set_mtime(const char *path, int64_t mtime_sec, long mtime_nsec) {
+/* set_times: utimensat with AT_SYMLINK_NOFOLLOW (works for symlinks too).
+ * Restores mtime always; atime too when the snapshot recorded one (older
+ * snapshots did not -- UTIME_OMIT leaves it alone). Returns 0/-1. */
+static int set_times(const char *path, int64_t mtime_sec, long mtime_nsec,
+                     const struct tp_extra_times *extra) {
     struct timespec times[2];
-    times[0].tv_sec = 0;
-    times[0].tv_nsec = UTIME_OMIT;
+    if (extra != NULL && extra->atime_sec != TP_TIME_ABSENT) {
+        times[0].tv_sec = (time_t)extra->atime_sec;
+        times[0].tv_nsec = extra->atime_nsec;
+    } else {
+        times[0].tv_sec = 0;
+        times[0].tv_nsec = UTIME_OMIT;
+    }
     times[1].tv_sec = (time_t)mtime_sec;
     times[1].tv_nsec = mtime_nsec;
     return utimensat(AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW);
+}
+
+/* set_btime: best-effort creation-date restore. Only macOS/BSD expose an API
+ * for this (setattrlist + ATTR_CMN_CRTIME); Linux has none, so there this is
+ * a no-op and the value survives only in the manifest and pax headers. MUST
+ * run after set_times: on APFS, writing an mtime older than the current
+ * creation date silently drags the creation date down with it, so the
+ * explicit crtime write has to come last to land exactly. Failures are
+ * ignored (filesystems without creation dates are common and non-fatal). */
+static void set_btime(const char *path, const struct tp_extra_times *extra) {
+#ifdef __APPLE__
+    if (extra == NULL || extra->btime_sec == TP_TIME_ABSENT) {
+        return;
+    }
+    struct attrlist al;
+    memset(&al, 0, sizeof(al));
+    al.bitmapcount = ATTR_BIT_MAP_COUNT;
+    al.commonattr = ATTR_CMN_CRTIME;
+    struct timespec ts;
+    ts.tv_sec = (time_t)extra->btime_sec;
+    ts.tv_nsec = extra->btime_nsec;
+    (void)setattrlist(path, &al, &ts, sizeof(ts), FSOPT_NOFOLLOW);
+#else
+    (void)path;
+    (void)extra;
+#endif
 }
 
 /* --- snapshot dir/symlink collection ------------------------------------ */
@@ -321,6 +359,7 @@ struct dir_meta {
     mode_t mode_perm;
     int64_t mtime_sec;
     long mtime_nsec;
+    struct tp_extra_times extra;
 };
 
 struct sym_meta {
@@ -332,6 +371,7 @@ struct sym_meta {
     gid_t gid;
     int64_t mtime_sec;
     long mtime_nsec;
+    struct tp_extra_times extra;
 };
 
 struct tree_ctx {
@@ -372,6 +412,7 @@ static int tree_cb(const struct tp_manifest_entry *entry, void *user_data) {
         d->mode_perm = entry->mode_perm;
         d->mtime_sec = entry->mtime_sec;
         d->mtime_nsec = entry->mtime_nsec;
+        d->extra = entry->extra;
         ctx->dir_count++;
         return 0;
     }
@@ -406,6 +447,7 @@ static int tree_cb(const struct tp_manifest_entry *entry, void *user_data) {
         s->gid = entry->gid;
         s->mtime_sec = entry->mtime_sec;
         s->mtime_nsec = entry->mtime_nsec;
+        s->extra = entry->extra;
         ctx->sym_count++;
         return 0;
     }
@@ -836,10 +878,11 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
             continue;
         }
         tp_verbosex("restore: symlink %s -> %s", full, s->target);
-        if (set_mtime(full, s->mtime_sec, s->mtime_nsec) != 0) {
-            tp_warn("restore: cannot set mtime on symlink '%s'", full);
+        if (set_times(full, s->mtime_sec, s->mtime_nsec, &s->extra) != 0) {
+            tp_warn("restore: cannot set times on symlink '%s'", full);
             result = 1;
         }
+        set_btime(full, &s->extra); /* FSOPT_NOFOLLOW: acts on the link itself */
         if (geteuid() == 0) {
             if (fchownat(AT_FDCWD, full, s->uid, s->gid, AT_SYMLINK_NOFOLLOW) != 0) {
                 tp_warn("restore: cannot chown symlink '%s'", full);
@@ -866,10 +909,11 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
                 result = 1;
             }
         }
-        if (set_mtime(full, g->mtime_sec, g->mtime_nsec) != 0) {
-            tp_warn("restore: cannot set mtime on '%s'", full);
+        if (set_times(full, g->mtime_sec, g->mtime_nsec, &g->extra) != 0) {
+            tp_warn("restore: cannot set times on '%s'", full);
             result = 1;
         }
+        set_btime(full, &g->extra);
         free(full);
     }
 
@@ -894,10 +938,11 @@ int tp_restore(const char *repo, const char *dest, const char *snapshot_label) {
                     result = 1;
                 }
             }
-            if (set_mtime(full, d->mtime_sec, d->mtime_nsec) != 0) {
-                tp_warn("restore: cannot set mtime on directory '%s'", full);
+            if (set_times(full, d->mtime_sec, d->mtime_nsec, &d->extra) != 0) {
+                tp_warn("restore: cannot set times on directory '%s'", full);
                 result = 1;
             }
+            set_btime(full, &d->extra);
             free(full);
         }
     }

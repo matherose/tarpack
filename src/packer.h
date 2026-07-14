@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "manifest.h" /* struct tp_extra_times */
+
 /*
  * Pack writer (multi-pack since milestone v1.0).
  *
@@ -38,6 +40,7 @@ struct tp_packed_object {
     off_t size;
     int64_t mtime_sec;
     long mtime_nsec;
+    struct tp_extra_times extra; /* atime/btime/ctime; TP_TIME_ABSENT = omit */
 
     /* filled in during packing (empty/0 until then) */
     char sha256_hex[65];
