@@ -35,6 +35,10 @@ endif()
 # ---------------------------------------------------------------------------
 set(TARPACK_COMPILE_DEFS
     _POSIX_C_SOURCE=200809L
+    # glibc shades the XSI file-type constants (S_IFREG, S_IFDIR, ...) behind
+    # _DEFAULT_SOURCE; without it strict-C11 builds on Linux fail. No-op on
+    # other libcs (macOS uses _DARWIN_C_SOURCE the same way).
+    _DEFAULT_SOURCE
     _DARWIN_C_SOURCE
     _FILE_OFFSET_BITS=64
 )

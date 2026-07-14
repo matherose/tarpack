@@ -1336,9 +1336,15 @@ static int write_one_pack_and_commit(const char *repo, const char *packs_dir, in
     char pack_path[PATH_MAX];
     char pack_part[PATH_MAX];
     char manifest_path[PATH_MAX];
-    snprintf(pack_path, sizeof(pack_path), "%s/%s.tar.zst", packs_dir, pack_name);
-    snprintf(pack_part, sizeof(pack_part), "%s/%s.tar.zst.part", packs_dir, pack_name);
-    snprintf(manifest_path, sizeof(manifest_path), "%s/%s.json", packs_dir, pack_name);
+    if (snprintf(pack_path, sizeof(pack_path), "%s/%s.tar.zst", packs_dir, pack_name) >=
+            (int)sizeof(pack_path) ||
+        snprintf(pack_part, sizeof(pack_part), "%s/%s.tar.zst.part", packs_dir, pack_name) >=
+            (int)sizeof(pack_part) ||
+        snprintf(manifest_path, sizeof(manifest_path), "%s/%s.json", packs_dir, pack_name) >=
+            (int)sizeof(manifest_path)) {
+        tp_warnx("pack: path too long in '%s'", packs_dir);
+        return -1;
+    }
 
     /* Any stale orphan <pack_name>.tar.zst.part left over from a previous
      * crashed run at this same pack number is not a "finished pack" (see
